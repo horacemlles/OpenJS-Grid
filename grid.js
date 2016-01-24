@@ -1161,10 +1161,12 @@ var grids = [];
 				save : true, 
 				json : rows,
 				saveable : self.saveable
+
 			}, function(res) {
 				if(res == 1) {
 					self.alert("info","Saved!",i + " Row(s) saved");
 					$(self.el).trigger("save",rows[pkey],res);
+					self.toSave = [];
 				} else {
 					self.error(res);
 					$(self.el).trigger("saveFail",rows[pkey],res);
@@ -1566,3 +1568,4 @@ var grids = [];
 String.prototype.has = function(search) {
 	return (this.indexOf(search) !== -1);
 }
+
