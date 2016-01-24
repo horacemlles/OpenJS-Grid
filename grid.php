@@ -6,6 +6,16 @@ OpenJS Grid
 This is openGrid version 2.0
 
 */
+Class Pk{
+	public function getPk( $var )
+	{
+		if(property_exists($this, $var))
+		{
+			return $this->$var;
+		}
+		return false;
+	}
+}
 
 
 Class Grid {
@@ -23,12 +33,14 @@ Class Grid {
 	var $security;
 	var $set;
 	var $sql;
-	
+
+
 	function __construct($table, $options) {
 		$this->table = $table;
 		
 		// save
 		if( isset($options['save']) && isset($_POST['save']) && $options['save'] == "true") {
+
 			echo $this->save();
 		
 		// delete
@@ -70,7 +82,7 @@ Class Grid {
 	
 	function save() {
 		$saveArray = $this->getSaveArray();
-		
+
 		// we need a primary key for editing
 		$primaryKey = $this->getPrimaryKey();
 
@@ -86,38 +98,49 @@ Class Grid {
 				if(!is_array($this->security) || in_array($key,$this->security)) {
 					// dont save fields that weren't saveable. i.e. joined fields
 					if(in_array($key,$_POST['saveable'])) {
-						$key =  mysql_real_escape_string($key);
-						$value =  mysql_real_escape_string($value);
+						$key =  $key;
+						$value =  $value;
 						$setArray[] = "`$key`='$value'";
+
 					}
 				}	
 			}
-			
-			$sql = "UPDATE {$this->table} SET ".implode(",",$setArray)." WHERE `$primaryKey` = '$rowId'";
-			
-			$res = mysql_query($sql);
 
-			// die with messages if fail
-			$this->dieOnError($sql);
-		}
-		return (bool) $res;
+include 'connect.php';
+	$sql = "UPDATE {$this->table} SET ".implode(",",$setArray)." WHERE `$primaryKey` = '$rowId'";
+			/*orginal code
+			$res = query($sql); */
+
+if ($res = $db->exec($sql))
+
+	{
+	return (bool) $res;	
 	}
+	
+	else
+	{
+		echo "res = " . $res . "  sql = " .$sql;
+	}
+}
+	}
+
 	
 	// use this to write your own custom save function for the data
 	function getSaveArray() {
 		return $_POST['json'];
+		//return json_encode($_POST);
 	}
 	
 	// adds a new row based on the editable fields
 	function add() {
-		
+include 'connect.php';
 		// if didn't pass a set param, just add a new row
 		if(empty($this->set)) {
-			mysql_query("INSERT INTO {$this->table} VALUES ()");
+			$db->exec("INSERT INTO {$this->table} VALUES ()");
 		
 		// if you passed a set param then use that in the insert
 		} else {
-			mysql_query("INSERT INTO {$this->table} SET {$this->set}");
+			$db->exec("INSERT INTO {$this->table} SET {$this->set}");
 		}
 		
 		// we return the primary key so that we can order by it in the jS
@@ -125,9 +148,11 @@ Class Grid {
 	}
 	
 	function delete() {
+
+include 'connect.php';
 		$post = $this->_safeMysql();
 		$primaryKey = $this->getPrimaryKey();
-		return mysql_query("DELETE FROM {$this->table} WHERE `$primaryKey` = '$post[id]'");
+		return $db->exec("DELETE FROM {$this->table} WHERE `$primaryKey` = '$post[id]'");
 	}
 	
 	function select($selects) {
@@ -174,6 +199,7 @@ Class Grid {
 						if(!isset($this->fields[$col]) && !in_array($col,$usedCols)) {
 							$newColsArray[] = "`$table`.`$col`";
 							$usedCols[] = $col;
+
 						}	
 					}
 				}
@@ -238,6 +264,8 @@ Class Grid {
 		
 		// get an array of saveable fields
 		$saveable = $colsArray;
+
+
 		// bug #1# @eric.tuvesson@gmail.com
 		if(is_array($fields)) {
 			foreach($fields as $field=>$detail) {
@@ -342,7 +370,6 @@ Class Grid {
 		
 		// put it back
 		$colsArray = $newColsArray;
-		
 		// get primary key
 		$primaryKey = $this->getPrimaryKey();
 		
@@ -360,8 +387,11 @@ Class Grid {
 					$col = str_replace("`","",$col);
 					list($aTable,$field) = explode(".",$col);
 					if(!$aTable) $aTable = $this->table;
+		/*		Orginal code	
 					$colDataSql = mysql_query("SHOW columns FROM $aTable WHERE Field = '$field'");
-					while($row = mysql_fetch_assoc($colDataSql)) {
+					while($row = mysql_fetch_assoc($colDataSql)) */
+					$colDataSql = $pdo->prepare("SHOW columns FROM $aTable WHERE Field = '$field'");
+					while($row = $colDataSql->exec())		 {
 						$type = $row['Type'];
 					}
 					preg_match('/\(([^\)]+)/',$type,$matches);
@@ -475,8 +505,11 @@ Class Grid {
 				$sql2 = preg_replace('/LIMIT[\s\d,]+$/','',$sql);
 			
 				// find the total results to send back
-				$res = mysql_query($sql2);
-				$data['nRows'] = mysql_num_rows($res);
+
+		include 'connect.php';			
+				$res = $db->prepare($sql2);
+				$res->execute();
+				$data['nRows'] = $res->columncount();
 			} else {
 				$data['nRows'] = $this->limit;
 			}
@@ -516,10 +549,16 @@ Class Grid {
 	// using the current table will get the primary key column name
 	// does not work for combined primary keys
 	function getPrimaryKey($table=NULL) {
+
+include 'connect.php';
 		if(!$table) $table = $this->table;
-		$primaryKey = mysql_query("SHOW KEYS FROM `$table` WHERE Key_name = 'PRIMARY'");
-		$primaryKey = mysql_fetch_assoc($primaryKey);
-		return $primaryKey['Column_name'];
+		$smt = $db->prepare("SHOW KEYS FROM `$table` WHERE Key_name = 'PRIMARY'");
+
+		$smt->execute();
+		$row = $smt->fetchobject("Pk");
+		$primaryKey = $row->getPk('Column_name');
+		return $primaryKey;
+
 	}
 	
 	// if there is a mysql error it will die with that error
@@ -532,36 +571,50 @@ Class Grid {
 	
 	// runs a query, always returns a multi dimensional array of results
 	function _queryMulti($sql) {
+
+include 'connect.php';
 		$array = array();
-		$res = mysql_query($sql);
+		$res = $db->prepare($sql);
+
+	try 
+	{
+			$res->execute();
+	}
+    catch(PDOException $ex)
+    {
+		echo $ex->getMessage();
+	}
+	//get column count from table
+	    $resc = $res->columncount();
+
 		if((bool)$res) {
 			// if there is only 1 field, just return and array with that field as each value
-			if(mysql_num_fields($res) > 1) {
-				while($row = mysql_fetch_assoc($res)) $array[] = $row;
-			} else if(mysql_num_fields($res) == 1) {
-				while($row = mysql_fetch_assoc($res)) {
+			if($resc > 1) {
+				while($row = $res->fetch(PDO::FETCH_ASSOC)) $array[] = $row;
+			} else if ($resc == 1) {
+				while($row = $res->fetch(PDO::FETCH_ASSOC)) {
 					foreach($row as $item) $array[] = $item;
 				}	
 			}	
-			$error = mysql_error();
-			if($error) echo $error;
+
 		}
 		return $array;
 	}
-	
+
 	// safeify post
 	function _safeMysql($post=NULL) {
 		if(!isset($post)) $post = $_POST;
+
 		$postReturn = array();
 		foreach($post as $key=>$value) {
 			if(!is_array($value)) {
-				$postReturn[$key] = mysql_real_escape_string(urldecode($value)); 
+  			$postReturn[$key] = $value;
 			} else if(is_array($value)) {
 				$postReturn[$key] = $value;
 			}	
 		}
 		return $postReturn;
-	}
+	} 
 }
 
 
